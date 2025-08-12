@@ -1,6 +1,6 @@
 require('dotenv').config();
 const express = require('express')
-const { MongoClient, ServerApiVersion } = require('mongodb');
+const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 const app = express()
 const port = process.env.PORT || 3000;
 const cors = require('cors');
@@ -33,6 +33,7 @@ async function run() {
         // Send a ping to confirm a successful connection
 
         const messageCollection = client.db('mysterioDb').collection('messages');
+        const projectCollection = client.db('mysterioDb').collection('projects');
 
 
         app.post('/messageToMysterio', async (req, res) => {
@@ -83,6 +84,45 @@ async function run() {
             catch (error) {
                 console.log('error calling ai', error);
                 res.status(500).json({ error: 'An error occurred while processing your request.' });
+            }
+        });
+
+
+        app.get('/projects',async(req,res)=> {
+            console.log('touched');
+            try{
+                const projects = await projectCollection.find().toArray();
+                // console.log(projects);
+                if(!projects){
+                    return res.status(404).json({message:"no projects found"});
+                }else {
+                    res.status(200).json(projects);
+                }
+            }
+            catch(err){
+                console.error('error fetching all projects',err);
+                res.status(500).json({message:"internal server error getting all projects"});
+            }
+        });
+
+        app.get('/project/:id',async(req,res)=> {
+            const {id}= req.params;
+            if(!id){
+                return res.status(400).json({message:"project id not found"});
+            }
+            try{
+                const project = await projectCollection.findOne({
+                    _id : new ObjectId(id)
+                });
+                if(!project){
+                    return res.status(404).json({message:"no project found with this id"});
+                }else {
+                    res.status(200).json(project?.details);
+                }
+            }
+            catch(err){
+                console.error("error getting single project details",err);
+                res.status(500).json({message:"internal server error getting single project details"});
             }
         })
 
