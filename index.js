@@ -88,41 +88,82 @@ async function run() {
         });
 
 
-        app.get('/projects',async(req,res)=> {
+        app.get('/projects', async (req, res) => {
             console.log('touched');
-            try{
+            try {
                 const projects = await projectCollection.find().toArray();
                 // console.log(projects);
-                if(!projects){
-                    return res.status(404).json({message:"no projects found"});
-                }else {
+                if (!projects) {
+                    return res.status(404).json({ message: "no projects found" });
+                } else {
                     res.status(200).json(projects);
                 }
             }
-            catch(err){
-                console.error('error fetching all projects',err);
-                res.status(500).json({message:"internal server error getting all projects"});
+            catch (err) {
+                console.error('error fetching all projects', err);
+                res.status(500).json({ message: "internal server error getting all projects" });
             }
         });
 
-        app.get('/project/:id',async(req,res)=> {
-            const {id}= req.params;
-            if(!id){
-                return res.status(400).json({message:"project id not found"});
+        app.post('/projects', async (req, res) => {
+            const project = req.body;
+            if (!project) return res.status(400).json({ message: "project data not found" });
+
+            try {
+                const { title, description, image, images, liveLink, technologies, githubLink, futureImprovements, challenges } = project;
+
+                const updatedStructure = {
+                    title,
+                    description,
+                    image,
+                    technologies,
+                    liveLink,
+                    githubLink,
+                    details: [
+                        {
+                            images,
+                            technologies,
+                            description,
+                            liveLink,
+                            githubLink,
+                            challenges,
+                            futureImprovements
+                        }
+                    ]
+                };
+
+                const result = await projectCollection.insertOne(updatedStructure);
+                if (!result.insertedId) {
+                    return res.status(400).json({ message: "failed to add project. try again" });
+                }
+                res.status(201).json(result);
             }
-            try{
+            catch (err) {
+                console.error("error adding new project", err);
+                res.status(500).json({ message: "internal server error adding new project" });
+            }
+
+        });
+
+
+        app.get('/project/:id', async (req, res) => {
+            const { id } = req.params;
+            if (!id) {
+                return res.status(400).json({ message: "project id not found" });
+            }
+            try {
                 const project = await projectCollection.findOne({
-                    _id : new ObjectId(id)
+                    _id: new ObjectId(id)
                 });
-                if(!project){
-                    return res.status(404).json({message:"no project found with this id"});
-                }else {
+                if (!project) {
+                    return res.status(404).json({ message: "no project found with this id" });
+                } else {
                     res.status(200).json(project?.details);
                 }
             }
-            catch(err){
-                console.error("error getting single project details",err);
-                res.status(500).json({message:"internal server error getting single project details"});
+            catch (err) {
+                console.error("error getting single project details", err);
+                res.status(500).json({ message: "internal server error getting single project details" });
             }
         })
 
