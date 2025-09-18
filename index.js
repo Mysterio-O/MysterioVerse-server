@@ -5,9 +5,16 @@ const app = express()
 const port = process.env.PORT || 3000;
 const cors = require('cors');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
+const mysterioData = require('./mysterioData');
+const cache = new Map();
+const rateLimit = require('express-rate-limit');
 
 app.use(cors());
 app.use(express.json());
+
+const limiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 50 });
+app.use('/ask-ai-assistant', limiter);
+
 
 
 const client = new MongoClient(process.env.DB_URI, {
@@ -18,12 +25,40 @@ const client = new MongoClient(process.env.DB_URI, {
     }
 });
 
+
+
+const systemPrompt = `
+You are Friday, AI assistant for Mysterio (SK Maruf Hossain), a passionate MERN/Next.js || Frontend developer from Bangladesh.
+
+🎯 ROLE:
+- Answer ONLY about Mysterio: projects, skills, education, contact.
+- You can answer about random topic if it doesn't violet any law or religious point.
+- If asked generally about "projects" or "his work", list ALL projects with Live and GitHub links using [Live Demo](url) and [GitHub](url) format. DO NOT say "I don't have links".
+- Be professional, concise, enthusiastic.
+- If unsure → "I don't know — contact Mysterio directly: skrabbi.019@gmail.com | +880 1601111011"
+- For project details → ALWAYS include Live & GitHub links.
+- For LinkedIn/GitHub/Resume → provide links.
+- Highlight tech stacks when relevant.
+- Use short, clickable markdown links like [Live Demo](url) or [GitHub](url).
+- Always send structured response.
+
+🛠️ QUICK FACTS:
+- Projects: Plant Pulse, GalaxiMart, LifeDrop, StudySphere, CLI Tool (react-setup-pro)
+- Skills: React, Next.js, Firebase, Node, MongoDB, Tailwind, Motion, TanStack Query, AI Integration
+- Education: Programming Hero Web Dev Bootcamp (99.52%), SCIC Black Belt (Top 89/4000), UoPeople (CS Associate)
+- Goal: Seeking remote dev roles
+
+💡 You have access to detailed project/tech info — use it to give rich, accurate responses.
+`;
+
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 const model = genAI.getGenerativeModel({
-    model: 'gemini-1.5-flash'
+    model: 'gemini-1.5-flash',
+    systemInstruction: {
+        role: "system",
+        parts: [{ text: systemPrompt }]
+    }
 })
-
-const systemPrompt = `You are a helpful AI assistant for Mysterio; real name SK Maruf Hossain's portfolio website. Your name is Friday. You provide accurate information about Mysterio, a MERN Stack developer skilled in React.js, Tailwind, Node, Express, MongoDB. Mysterio has worked on a couple of projects build with React.js, like:- Plant Pulse, GalaxiMart, LifeDrop. Plant Pulse is a website where users can add details about their plants and monitor their plants health and condition. GalaxiMart is a eCommerce website where people can browse tons of products based on categories. Users can add products to cart and buy them or add them in the wishlist. LifeDrop is a website where users can donate blood and also request for blood. That is a full featured role based website where roles are divided into Admin, Volunteer and donor. Admin has almost all kind of access without users personal sensitive information and can manage all the users and their roles. Volunteer has comparatively less authority than admin, moreover they can see all pending blood donation requests and other small things. Donor can only see their own profile and can make request for blood. Another project o him is a CLI tool. Mysterio created that tool in only 2 hour with a quick idea. Once he felt that setting up a new react project, integrating tailwind, firebase, axios interceptors, theme provider cost no less than 3-4 hours or more. so he decided to create a CLI tool which will create this with one command line. From this idea, mysterio created the CLI tool and published it in npm. This tool creates a react application with react router setup, tailwind setup, firebase authentication functions, axios interceptors, custom useful hooks, theme provider with theme toggle switch and many more. To use it run this command in the terminal: "npx react-setup-pro your-application-name". Mysterio is also a full stack developer with a good knowledge of JavaScript, React.js, Node.js, Express.js, MongoDB, Next.js, Tailwind CSS, Motion, Bootstrap, DaisyUI, Material UI and many more. Mysterio is a fast learner and eager to learn new technologies. His educational life was a tragedy, he enrolled in civil engineering in back 2017 after finishing his SSC, but he didn't find interest in this field. Finally he left engineering at his 5th semester in 2020 (in the covid lockdown). Then he enrolled in Bangladesh Open University to complete his HSC in 2021. He had plans to complete his graduation from abroad. But two things prevented him from doing so, one is his financial condition and other is his study gap. At this point of his life, he was getting hopeless day by day. But he didn't give up. He heard about web development bootcamp at Programming Hero from his friend. He enrolled in the bootcamp in 2024 december. His journey wasn't that smooth. HTML, CSS, Tailwind seemed easy to him and he did great result in assignments based on HTML, CSS, Tailwind, he got 100% in each of them. But another tragedy was waiting for him, he lost his loved one at this point and at the same time their javaScript modules had stated being taught. It was the most difficult challenges that he had to face on that moment. He couldn't focus on javaScript and it started seeming too hard for him that he once almost decided to quit. But somehow he regain concentration and started focusing on javaScript. He practiced a lot, watched videos, read articles, did assignments and finally he was able to understand the concepts of javaScript. After that he completed the bootcamp with a great success. His average mark was 99.52%. He secured 717 mark out of 720 in all 12 assignments. Now he is enrolled in an associate in computer science in the University of the People, USA. Now he is looking for remote roles mainly. But he is open to any kind of opportunities. Answer questions about Mysterio professionally and concisely. If you don't know the answer, say "I don't know, you can directly ask to Mysterio. Email: skrabbi.019@gmail.com, Phone: +880 1601111011". For general questions, provide accurate and helpful responses.`
 
 
 async function run() {
@@ -53,37 +88,112 @@ async function run() {
 
         app.post('/ask-ai-assistant', async (req, res) => {
             try {
-                const { message } = req.body;
+                let { message } = req.body;
                 console.log(req.body);
                 if (!message) {
                     return res.status(400).json({ error: 'Message is required' });
                 }
+                message = message.trim().toLowerCase();
+
+                // send cache response if available
+                const cacheKey = message.toLowerCase().trim();
+                if (cache.has(cacheKey)) return res.status(200).json({ response: cache.get(cacheKey) });
+
+                // inject project data if detected
+                let injectedContext = '';
+
+
+                // detect general project requests
+                if (
+                    message.includes('his projects') ||
+                    message.includes('all projects') ||
+                    message.includes("list projects") ||
+                    message.includes("showcase") ||
+                    message.includes('project') && !Object.keys(mysterioData.projects).some(key => message.includes(key))
+                ) {
+                    injectedContext += "\n\nPROJECTS OVERVIEW (USE THESE LINKS!):\n";
+                    for (const [key, project] of Object.entries(mysterioData.projects)) {
+                        injectedContext += `\n**${project.name || key}**\n`;
+                        injectedContext += `Description: ${project.description}\n`;
+                        injectedContext += `Live: [Live Demo](${project.live}) | GitHub: [Source Code](${project.github})\n`;
+                        injectedContext += `Tech: ${project.tech.join(', ')}\n`;
+                        if (project.command) injectedContext += `Command: \`${project.command}\`\n`;
+                        injectedContext += `---\n`;
+                    }
+                }
+
+
+                // check for projects name
+                for (const [key, project] of Object.entries(mysterioData.projects)) {
+                    if (message.includes(key)) {
+                        injectedContext += `\n\nProject Context: ${key.toUpperCase()}\nDescription: ${project.description}\nLive: [Live Demo](${project.live}) | Github: [Source Code](${project.github})\nTechnologies: ${project.tech.join(', ')}\n`;
+                    }
+                }
+
+                // check for contact links
+                if (message.includes('contact') || message.includes('mail') || message.includes('phone')) {
+                    injectedContext += `\n\nCONTACT: Email: [${mysterioData.contact.email}](mailto:${mysterioData.contact.email}) | Phone: ${mysterioData.contact.phone}`;
+                }
+
+                if (message.includes('linkedin')) injectedContext += `\nLinkedin: [Profile](${mysterioData.contact.linkedin})`;
+                if (message.includes('github')) injectedContext += `\nGithub: [Profile](${mysterioData.contact.github})`;
+                if (message.includes('resume') || message.includes('cv')) injectedContext += `\nResume: [Download PDF](${mysterioData.contact.resume})`;
+
+                if (message.includes('language') || message.includes('english')) {
+                    injectedContext += "\n\nLANGUAGE OVERVIEW (USE THESE LINKS):\n";
+                    for(const[key,language] of Object.entries(mysterioData.languages)){
+                        injectedContext += `\n**${language?.name || key}**\n`;
+                        injectedContext += `Fluency: ${language.fluency}\n`
+                    }
+                };
+
+                if(message.includes('services') || message.includes('work') || message.includes('job')){
+                    injectedContext += "\n\nSERVICE OVERVIEW (USE THESE LINKS):\n";
+                    for(const [key,service] of Object.entries(mysterioData.services)){
+                        injectedContext += `\n**${service.name || key}**\n`;
+                        injectedContext += `Action: ${service.action}\n`;
+                    }
+                }
+
+
+                // send to gemini with minimal context injection
+                const userMessage = injectedContext
+                    ? `${message}\n\n---\nHere's some context to help you answer:\n${injectedContext}`
+                    : message;
+
+                console.log('user message ->', userMessage, 'injected context ->', injectedContext);
 
                 const result = await model.generateContent({
                     contents: [
                         {
                             role: 'user',
-                            parts: [
-                                {
-                                    text: systemPrompt + `\n\nUser: ` + message
-                                }
-                            ]
+                            parts: [{ text: userMessage }]
                         }
                     ]
                 });
 
-                console.log('result is->', result);
+                let responseText = await result.response.text();
 
-                const response = await result.response;
+                // cache response
+                if (responseText.length < 800 && !responseText.includes('I don"t know')) {
+                    cache.set(cacheKey, responseText);
+                }
 
-                console.log('response is->', response);
+                // enforce link formatting or fallback
+                if (!responseText.includes('http') && message.includes('link') || message.includes('github') || message.includes('live')) {
+                    responseText = "I found relevant links for you:\n" + injectedContext.replace(/---\nHere's some context to help you answer:\n/, "");
+                }
 
-                res.status(200).json({ response: response.text() });
+
+
+                res.status(200).json({ response: responseText });
 
             }
             catch (error) {
                 console.log('error calling ai', error);
-                res.status(500).json({ error: 'An error occurred while processing your request.' });
+                res.status(200).json({
+                    response: "I'm having trouble right now. Contact to Myterio directly: skrabbi.019@gmail.com"
+                })
             }
         });
 
