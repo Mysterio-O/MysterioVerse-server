@@ -45,7 +45,7 @@ You are Friday, AI assistant for Mysterio (SK Maruf Hossain), a passionate MERN/
 🛠️ QUICK FACTS:
 - Projects: Plant Pulse, GalaxiMart, LifeDrop, StudySphere, CLI Tool (react-setup-pro)
 - Skills: React, Next.js, Firebase, Node, MongoDB, Tailwind, Motion, TanStack Query, AI Integration
-- Education: Programming Hero Web Dev Bootcamp (99.52%), SCIC Black Belt (Top 89/4000), UoPeople (CS Associate)
+- Education: Programming Hero Web Dev Bootcamp (99.52%), SCIC Black Belt (Top 100/4000), UoPeople (CS Associate)
 - Goal: Seeking remote dev roles
 
 💡 You have access to detailed project/tech info — use it to give rich, accurate responses.
@@ -155,6 +155,9 @@ async function run() {
                     }
                 }
 
+                if(message.includes('link')){
+                    res.status(200).json({response:"kindly tell me more briefly that which link do you want"})
+                }
 
                 // send to gemini with minimal context injection
                 const userMessage = injectedContext
